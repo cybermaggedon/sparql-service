@@ -246,19 +246,6 @@ int sparql(MHD_Connection* connection, const char* query, const char* output,
     return ret;
 }
 
-static int connection(void* cls, struct MHD_Connection* conn,
-		      void** socket_context,
-		      MHD_ConnectionNotificationCode toe)
-{
-
-    if (toe == MHD_CONNECTION_NOTIFY_CLOSED)
-	exit(0);
-
-    return 0;
-
-}
-
-
 /* HTTP request handler. */
 static int request_handler(void* cls, struct MHD_Connection* connection,
 			   const char* url, const char* method,
@@ -370,10 +357,12 @@ void request_completed(void* cls, struct MHD_Connection* connection,
 int main(int argc, char ** argv)
 {
 
-    if (argc != 3) {
-        fprintf(stderr, "Usage:\n\tsparql <store> <name>\n");
+    if (argc != 4) {
+        fprintf(stderr, "Usage:\n\tsparql <port> <store> <name>\n");
         exit(1);
     }
+
+    unsigned int port_num = atoi(argv[1]);
 
     try {
 
@@ -382,7 +371,7 @@ int main(int argc, char ** argv)
 
 	/* Connect to storage. */
 	librdf_storage* storage =
-	    librdf_new_storage(world, argv[1], argv[2], "");
+	    librdf_new_storage(world, argv[2], argv[3], "");
 	if (storage == 0)
 	    throw std::runtime_error("Didn't get storage");
 	
@@ -400,32 +389,14 @@ int main(int argc, char ** argv)
 	struct MHD_Daemon * d;
 	/* libmicrohttpd web server. */
 	d = MHD_start_daemon(
-//	    MHD_USE_SELECT_INTERNALLY |
-	    MHD_USE_THREAD_PER_CONNECTION |
-	    MHD_USE_NO_LISTEN_SOCKET |
+	    MHD_USE_SELECT_INTERNALLY |
 	    MHD_USE_PIPE_FOR_SHUTDOWN,
-	    0,
+	    port_num,
 	    NULL, NULL, &request_handler, (void *) model,
 	    MHD_OPTION_NOTIFY_COMPLETED, &request_completed, 0,
-	    MHD_OPTION_NOTIFY_CONNECTION, &connection, 0,
 	    MHD_OPTION_END);
 	if (d == NULL)
 	    exit(1);
-
-	struct sockaddr_in addr;
-
-	socklen_t len = sizeof(addr);
-	int ret = getsockname(0, (struct sockaddr*) &addr, &len);
-	if (ret < 0) {
-	    std::cerr << "Couldn't get socket address." << std::endl;
-	    exit(1);
-	}
-
-	ret = MHD_add_connection(d, 0, (struct sockaddr*) &addr, len);
-	if (ret != MHD_YES) {
-	    std::cerr << "Add connection failed." << std::endl;
-	    exit(1);
-	}
 	
 	/* Wait forever. */
 	while (1) {
