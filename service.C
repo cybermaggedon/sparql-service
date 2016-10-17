@@ -1,0 +1,414 @@
+#include <iostream>
+#include <algorithm>
+
+#include <boost/utility/string_ref.hpp>
+#include <boost/asio/io_service.hpp>
+#include <boost/asio/spawn.hpp>
+#include <boost/asio/signal_set.hpp>
+#include <boost/http/buffered_socket.hpp>
+#include <boost/http/algorithm.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
+#include <sstream>
+#include <stdexcept>
+#include <mutex>
+#include <redland.h>
+
+#include "rdf.h"
+
+#include "EdUrlParser.h"
+#include "io_strm.h"
+
+using namespace std;
+using namespace boost;
+
+#ifndef BASE_URI
+#define BASE_URI "https://github.com/cybermaggedon/"
+#endif
+
+class sparql {
+public:
+    rdf::world* w;
+    rdf::uri* base_uri;
+    rdf::storage* s;
+    rdf::model* m;
+    sparql(const std::string& store, const std::string& name) {
+	w = new rdf::world();
+	s = new rdf::storage(*w, store, name);
+	m = new rdf::model(*s);
+	base_uri = new rdf::uri(*w, BASE_URI);
+    }
+    ~sparql() {
+	delete base_uri;
+	delete m;
+	delete s;
+	delete w;
+    }
+};
+
+class http_reply_stream : public io_strm {
+private:
+    boost::asio::yield_context& yield;
+    boost::http::buffered_socket& socket;
+
+public:
+    http_reply_stream(raptor_world* rw, boost::http::buffered_socket& socket,
+		      boost::asio::yield_context& yield) :
+	yield(yield), socket(socket), io_strm(rw) {
+    }
+
+    virtual int write(unsigned char* bytes, unsigned int len) {
+	http::message reply;
+	std::copy(bytes, bytes+len, std::back_inserter(reply.body()));
+	socket.async_write(reply, yield);
+	return 0;
+    }
+    
+};
+
+class connection: public std::enable_shared_from_this<connection>
+{
+private:
+    sparql& s;
+public:
+    void operator()(asio::yield_context yield);
+
+    asio::ip::tcp::socket &tcp_layer() {
+	return socket.next_layer();
+    }
+
+    static std::shared_ptr<connection> make_connection(asio::io_service &ios,
+                                                       int counter,
+						       sparql& s) {
+	return std::shared_ptr<connection>{new connection{ios, counter, s}};
+    }
+
+private:
+
+    connection(asio::io_service &ios, int counter, sparql& s)
+        : socket(ios)
+        , counter(counter)
+	, s(s) {}
+
+    http::buffered_socket socket;
+    int counter;
+
+    std::string method;
+    std::string path;
+    http::message message;
+};
+
+void connection::operator()(asio::yield_context yield)
+{
+
+    auto self = shared_from_this();
+    try {
+
+	while (self->socket.is_open()) {
+
+	    // Read request.
+	    self->socket.async_read_request(self->method, self->path,
+					    self->message, yield);
+		
+	    if (http::request_continue_required(self->message)) {
+		// 100-CONTINUE
+		self->socket.async_write_response_continue(yield);
+	    }
+
+	    while (self->socket.read_state() != http::read_state::empty) {
+		switch (self->socket.read_state()) {
+		case http::read_state::message_ready:
+		    // Read some body.
+		    self->socket.async_read_some(self->message, yield);
+		    break;
+		case http::read_state::body_ready:
+		    // Read trailers.
+		    self->socket.async_read_trailers(self->message, yield);
+		    break;
+		default:;
+		}
+	    }
+
+	    std::string payload;
+
+	    if (self->message.body().size() != 0) {
+		std::copy(self->message.body().begin(),
+			  self->message.body().end(),
+			  std::back_inserter(payload));
+	    } else {
+
+		EdUrlParser* url = EdUrlParser::parseUrl(self->path);
+		payload = url->query;
+		delete url;
+
+	    }
+		    
+	    std::vector<query_kv_t> kvs;
+	    int num = EdUrlParser::parseKeyValueList(&kvs, payload);
+
+	    std::string query;
+	    std::string output;
+	    std::string callback;
+
+	    for(int i = 0; i < num; i++) {
+		if (kvs[i].key == "query")
+		    query = EdUrlParser::urlDecode(kvs[i].val);
+		if (kvs[i].key == "output")
+		    output = EdUrlParser::urlDecode(kvs[i].val);
+		if (kvs[i].key == "callback")
+		    callback = EdUrlParser::urlDecode(kvs[i].val);
+	    }
+
+	    std::cout << "Query: " << query << std::endl;
+	    std::cout << "Output: " << output << std::endl;
+	    std::cout << "Callback: " << callback << std::endl;
+	    std::cout << std::endl;
+
+	    /* Create new query */
+	    rdf::query qry = rdf::query(*(s.w), query, *(s.base_uri));
+
+	    std::cerr << "Query executed." << std::endl;
+	    
+	    /* Execute query */
+	    rdf::results& res = qry.execute(*(s.m));
+
+	    std::cerr << "Results acquired." << std::endl;
+	
+	    enum { IS_GRAPH, IS_BINDINGS, IS_BOOLEAN } results_type;
+
+	    if (res.is_graph())
+		results_type = IS_GRAPH;
+	    else if (res.is_bindings())
+		results_type = IS_BINDINGS;
+	    if (res.is_boolean())
+		results_type = IS_BOOLEAN;
+
+	    if (output == "json") {
+
+		std::cerr << "IN JSON CODE" << std::endl;
+
+		http::message reply;
+		
+		std::pair<std::string,std::string>
+		    ct("Content-type",
+		       "application/sparql-results+json");
+
+
+		// FIXME: Hide this in io_strm.
+		raptor_world* rw = raptor_new_world();
+		
+		reply.headers().insert(ct);
+
+		librdf_query_results_formatter* f =
+		    librdf_new_query_results_formatter2(res.res,
+							"json", 0,
+							0);
+
+		if (f == 0)
+		    throw std::runtime_error("Could not get formatter");
+
+		self->socket.async_write_response_metadata(200,
+							   string_ref("OK"),
+							   reply,
+							   yield);
+
+		http_reply_stream strm(rw, self->socket, yield);
+
+
+		int ret =
+		    librdf_query_results_formatter_write(strm.strm,
+							 f,
+							 res.res,
+							 0);
+
+		if (ret < 0)
+		    throw std::runtime_error("Results format failed.");
+
+		librdf_free_query_results_formatter(f);
+
+		self->socket.async_write_end_of_message( yield);
+
+	    } else if (results_type == IS_GRAPH) {
+
+		librdf_stream* stream = librdf_query_results_as_stream(res.res);
+
+		if (stream == 0)
+		    throw
+			std::runtime_error("Could not get results as stream.");
+
+		http::message reply;
+		
+		std::pair<std::string,std::string>
+		    ct("Content-type",
+		       "application/sparql-results+xml");
+
+		// FIXME: Hide this in io_strm.
+		// FIXME: raptor_world is leaked.
+		raptor_world* rw = raptor_new_world();
+
+		std::string mime_type = "application/sparql-results+xml";
+		
+		reply.headers().insert(ct);
+
+		librdf_serializer* serl =
+		    librdf_new_serializer(s.w->w, "rdfxml", 0, 0);
+		if (serl == 0)
+		    throw std::runtime_error("Could not get serialiser.");
+
+		self->socket.async_write_response_metadata(200,
+							   string_ref("OK"),
+							   reply,
+							   yield);
+
+		http_reply_stream strm(rw, self->socket, yield);
+
+		int ret =
+		    librdf_serializer_serialize_stream_to_iostream(
+			serl,
+			0,
+			stream,
+			strm.strm);
+
+		if (ret < 0)
+		    throw std::runtime_error("Serialisation failed.");
+
+		librdf_free_serializer(serl);
+		librdf_free_stream(stream);
+
+		self->socket.async_write_end_of_message(yield);
+		    
+	    } else {
+
+		http::message reply;
+		
+		std::pair<std::string,std::string>
+		    ct("Content-type",
+		       "application/sparql-results+xml");
+
+
+		// FIXME: Hide this in io_strm.
+		raptor_world* rw = raptor_new_world();
+
+		std::string mime_type = "application/sparql-results+xml";
+		
+		reply.headers().insert(ct);
+
+
+		librdf_query_results_formatter* f =
+		    librdf_new_query_results_formatter2(res.res,
+							0,
+							mime_type.c_str(),
+							0);
+
+		if (f == 0)
+		    throw std::runtime_error("Could not get formatter");
+
+		self->socket.async_write_response_metadata(200,
+							   string_ref("OK"),
+							   reply,
+							   yield);
+
+		http_reply_stream strm(rw, self->socket, yield);
+
+		int ret =
+		    librdf_query_results_formatter_write(strm.strm,
+							 f,
+							 res.res,
+							 0);
+
+		if (ret < 0)
+		    throw std::runtime_error("Results format failed.");
+
+		librdf_free_query_results_formatter(f);
+
+		self->socket.async_write_end_of_message( yield);
+
+	    }
+
+		    
+	    return;
+
+	}
+
+    } catch (system::system_error &e) {
+	if (e.code() != system::error_code{asio::error::eof}) {
+	    throw e;
+	}
+
+	return;
+	    
+    } catch (std::exception &e) {
+	std::cerr << "Oh no." << std::endl;
+	std::cerr << "Exception: " << e.what();
+	throw e;
+    }
+}
+
+
+
+int main(int argc, char** argv)
+{
+
+    if (argc != 4) {
+	std::cerr << "Usage:" << std::endl
+		  << "\tsparql <port> <store> <storename>" << std::endl;
+	exit(1);
+    }
+
+    std::istringstream istr(argv[1]);
+    unsigned int port;
+    istr >> port;
+
+    const std::string store(argv[2]);
+    const std::string name(argv[3]);
+
+    sparql s(store, name);
+
+    asio::io_service ios;
+    asio::ip::tcp::acceptor acceptor(ios,
+                                     asio::ip::tcp
+                                     ::endpoint(asio::ip::tcp::v6(), 8080));
+
+    auto signal_handler = [&s](const boost::system::error_code& error,
+			       int signal)
+	{
+	    std::cerr << "Stopping..." << std::endl;
+	    // FIXME: Need to stop anything?
+	    std::cerr << "Stopped." << std::endl;
+	    exit(1);
+	};
+
+    boost::asio::signal_set signals(ios, SIGINT, SIGTERM);
+
+    signals.async_wait(signal_handler);
+
+    auto work = [&acceptor, &s](asio::yield_context yield) {
+        int counter = 0;
+        for ( ; true ; ++counter ) {
+            try {
+                auto connection
+                    = connection::make_connection(acceptor.get_io_service(),
+                                                  counter, s);
+		std::cerr << "Wait for connection..." << std::endl;
+                acceptor.async_accept(connection->tcp_layer(), yield);
+		std::cerr << "Accepted" << std::endl;
+
+                auto handle_connection
+                    = [connection](asio::yield_context yield) mutable {
+                    (*connection)(yield);
+                };
+                spawn(acceptor.get_io_service(), handle_connection);
+            } catch (std::exception &e) {
+                cerr << "Aborting on exception: " << e.what() << endl;
+                std::exit(1);
+            }
+        }
+    };
+
+    spawn(ios, work);
+    ios.run();
+
+    return 0;
+
+}
+
