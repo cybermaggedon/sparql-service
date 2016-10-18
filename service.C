@@ -15,9 +15,7 @@
 #include <redland.h>
 
 #include "rdf.h"
-
 #include "EdUrlParser.h"
-#include "io_strm.h"
 
 using namespace std;
 using namespace boost;
@@ -46,7 +44,7 @@ public:
     }
 };
 
-class http_reply_stream : public io_strm {
+class http_reply_stream : public rdf::iostream {
 private:
     boost::asio::yield_context& yield;
     boost::http::buffered_socket& socket;
@@ -54,7 +52,7 @@ private:
 public:
     http_reply_stream(raptor_world* rw, boost::http::buffered_socket& socket,
 		      boost::asio::yield_context& yield) :
-	yield(yield), socket(socket), io_strm(rw) {
+	yield(yield), socket(socket), iostream(rw) {
     }
 
     virtual int write(unsigned char* bytes, unsigned int len) {
@@ -165,7 +163,7 @@ void connection::operator()(asio::yield_context yield)
 	    std::cout << std::endl;
 
 	    /* Create new query */
-	    rdf::query qry = rdf::query(*(s.w), query, *(s.base_uri));
+	    rdf::query qry(*(s.w), query, *(s.base_uri));
 
 	    std::cerr << "Query executed." << std::endl;
 	    
@@ -193,48 +191,41 @@ void connection::operator()(asio::yield_context yield)
 		    ct("Content-type",
 		       "application/sparql-results+json");
 
-
-		// FIXME: Hide this in io_strm.
+		// FIXME: Hide this in iostream.
 		raptor_world* rw = raptor_new_world();
 		
 		reply.headers().insert(ct);
 
-		librdf_query_results_formatter* f =
-		    librdf_new_query_results_formatter2(res.res,
-							"json", 0,
-							0);
-
-		if (f == 0)
-		    throw std::runtime_error("Could not get formatter");
+		rdf::formatter f(res, "json", "");
 
 		self->socket.async_write_response_metadata(200,
 							   string_ref("OK"),
 							   reply,
 							   yield);
 
+		if (callback != "") {
+		    reply.body().clear();
+		    std::copy(callback.begin(), callback.end(),
+			      std::back_inserter(reply.body()));
+		    reply.body().push_back('(');
+		    socket.async_write(reply, yield);
+		}
+
 		http_reply_stream strm(rw, self->socket, yield);
 
+		f.write(strm, res);
 
-		int ret =
-		    librdf_query_results_formatter_write(strm.strm,
-							 f,
-							 res.res,
-							 0);
-
-		if (ret < 0)
-		    throw std::runtime_error("Results format failed.");
-
-		librdf_free_query_results_formatter(f);
+		if (callback != "") {
+		    reply.body().clear();
+		    reply.body().push_back(')');
+		    socket.async_write(reply, yield);
+		}
 
 		self->socket.async_write_end_of_message( yield);
 
 	    } else if (results_type == IS_GRAPH) {
 
-		librdf_stream* stream = librdf_query_results_as_stream(res.res);
-
-		if (stream == 0)
-		    throw
-			std::runtime_error("Could not get results as stream.");
+		rdf::stream& ntr_strm = res.as_stream();
 
 		http::message reply;
 		
@@ -242,7 +233,7 @@ void connection::operator()(asio::yield_context yield)
 		    ct("Content-type",
 		       "application/sparql-results+xml");
 
-		// FIXME: Hide this in io_strm.
+		// FIXME: Hide this in iostream.
 		// FIXME: raptor_world is leaked.
 		raptor_world* rw = raptor_new_world();
 
@@ -250,10 +241,7 @@ void connection::operator()(asio::yield_context yield)
 		
 		reply.headers().insert(ct);
 
-		librdf_serializer* serl =
-		    librdf_new_serializer(s.w->w, "rdfxml", 0, 0);
-		if (serl == 0)
-		    throw std::runtime_error("Could not get serialiser.");
+		rdf::serializer serl(*(s.w), "rdfxml");
 
 		self->socket.async_write_response_metadata(200,
 							   string_ref("OK"),
@@ -262,19 +250,8 @@ void connection::operator()(asio::yield_context yield)
 
 		http_reply_stream strm(rw, self->socket, yield);
 
-		int ret =
-		    librdf_serializer_serialize_stream_to_iostream(
-			serl,
-			0,
-			stream,
-			strm.strm);
-
-		if (ret < 0)
-		    throw std::runtime_error("Serialisation failed.");
-
-		librdf_free_serializer(serl);
-		librdf_free_stream(stream);
-
+		serl.write_stream_to_iostream(ntr_strm, strm);
+		
 		self->socket.async_write_end_of_message(yield);
 		    
 	    } else {
@@ -286,22 +263,14 @@ void connection::operator()(asio::yield_context yield)
 		       "application/sparql-results+xml");
 
 
-		// FIXME: Hide this in io_strm.
+		// FIXME: Hide this in iostream.
 		raptor_world* rw = raptor_new_world();
 
 		std::string mime_type = "application/sparql-results+xml";
 		
 		reply.headers().insert(ct);
 
-
-		librdf_query_results_formatter* f =
-		    librdf_new_query_results_formatter2(res.res,
-							0,
-							mime_type.c_str(),
-							0);
-
-		if (f == 0)
-		    throw std::runtime_error("Could not get formatter");
+		rdf::formatter f(res, "", mime_type);
 
 		self->socket.async_write_response_metadata(200,
 							   string_ref("OK"),
@@ -310,16 +279,7 @@ void connection::operator()(asio::yield_context yield)
 
 		http_reply_stream strm(rw, self->socket, yield);
 
-		int ret =
-		    librdf_query_results_formatter_write(strm.strm,
-							 f,
-							 res.res,
-							 0);
-
-		if (ret < 0)
-		    throw std::runtime_error("Results format failed.");
-
-		librdf_free_query_results_formatter(f);
+		f.write(strm, res);
 
 		self->socket.async_write_end_of_message( yield);
 

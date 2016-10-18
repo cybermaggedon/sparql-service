@@ -1,10 +1,12 @@
 
 #include <stdexcept>
-#include "io_strm.h"
+#include "rdf.h"
 
-int io_strm::io_init(void* ctxt)
+using namespace rdf;
+
+int iostream::io_init(void* ctxt)
 {
-    io_strm* strm = (io_strm*) ctxt;
+    iostream* strm = (iostream*) ctxt;
     try {
 	strm->init();
 	return 0;
@@ -13,18 +15,18 @@ int io_strm::io_init(void* ctxt)
     }
 }
 
-void io_strm::io_finish(void* ctxt)
+void iostream::io_finish(void* ctxt)
 {
-    io_strm* strm = (io_strm*) ctxt;
+    iostream* strm = (iostream*) ctxt;
     try {
 	strm->finish();
     } catch (...) {
     }
 }
 
-int io_strm::io_write_byte(void* ctxt, const int byte)
+int iostream::io_write_byte(void* ctxt, const int byte)
 {
-    io_strm* strm = (io_strm*) ctxt;
+    iostream* strm = (iostream*) ctxt;
     try {
 	strm->write((unsigned char) byte);
 	return 0;
@@ -33,10 +35,10 @@ int io_strm::io_write_byte(void* ctxt, const int byte)
     }
 }
 
-int io_strm::io_write_bytes(void* ctxt, const void* ptr,
+int iostream::io_write_bytes(void* ctxt, const void* ptr,
 			    size_t size, size_t nm)
 {
-    io_strm* strm = (io_strm*) ctxt;
+    iostream* strm = (iostream*) ctxt;
     try {
 	int ret =
 	    strm->write((unsigned char*) ptr, size * nm);
@@ -47,9 +49,9 @@ int io_strm::io_write_bytes(void* ctxt, const void* ptr,
     }
 }
 
-int io_strm::io_write_end(void* ctxt)
+int iostream::io_write_end(void* ctxt)
 {
-    io_strm* strm = (io_strm*) ctxt;
+    iostream* strm = (iostream*) ctxt;
     try {
 	strm->write_end();
 	return 0;
@@ -58,10 +60,10 @@ int io_strm::io_write_end(void* ctxt)
     }
 }
 
-int io_strm::io_read_bytes(void* ctxt, void* ptr,
+int iostream::io_read_bytes(void* ctxt, void* ptr,
 			   size_t size, size_t nm)
 {
-    io_strm* strm = (io_strm*) ctxt;
+    iostream* strm = (iostream*) ctxt;
     try {
 	int ret =
 	    strm->read((unsigned char*) ptr, size * nm);
@@ -72,9 +74,9 @@ int io_strm::io_read_bytes(void* ctxt, void* ptr,
     }
 }
 
-int io_strm::io_read_eof(void* ctxt)
+int iostream::io_read_eof(void* ctxt)
 {
-    io_strm* strm = (io_strm*) ctxt;
+    iostream* strm = (iostream*) ctxt;
     try {
 	bool ret = strm->read_eof();
 	if (ret)
@@ -85,7 +87,7 @@ int io_strm::io_read_eof(void* ctxt)
     }
 }
 
-io_strm::io_strm(raptor_world* rw)
+iostream::iostream(raptor_world* rw)
 {
 
     ioh.version = 2;
@@ -106,7 +108,7 @@ io_strm::io_strm(raptor_world* rw)
 
 }
 
-io_strm::~io_strm()
+iostream::~iostream()
 {
     if (strm) raptor_free_iostream(strm);
 }
