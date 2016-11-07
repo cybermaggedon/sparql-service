@@ -191,10 +191,14 @@ void connection::operator()(asio::yield_context yield)
 		    ct("Content-type",
 		       "application/sparql-results+json");
 
+		std::pair<std::string,std::string>
+		    acao("Access-Control-Allow-Origin", "*");
+
 		// FIXME: Hide this in iostream.
 		raptor_world* rw = raptor_new_world();
 		
 		reply.headers().insert(ct);
+		reply.headers().insert(acao);
 
 		rdf::formatter f(res, "json", "");
 
@@ -233,6 +237,9 @@ void connection::operator()(asio::yield_context yield)
 		    ct("Content-type",
 		       "application/sparql-results+xml");
 
+		std::pair<std::string,std::string>
+		    acao("Access-Control-Allow-Origin", "*");
+
 		// FIXME: Hide this in iostream.
 		// FIXME: raptor_world is leaked.
 		raptor_world* rw = raptor_new_world();
@@ -240,6 +247,7 @@ void connection::operator()(asio::yield_context yield)
 		std::string mime_type = "application/sparql-results+xml";
 		
 		reply.headers().insert(ct);
+		reply.headers().insert(acao);
 
 		rdf::serializer serl(*(s.w), "rdfxml");
 
@@ -262,6 +270,8 @@ void connection::operator()(asio::yield_context yield)
 		    ct("Content-type",
 		       "application/sparql-results+xml");
 
+		std::pair<std::string,std::string>
+		    acao("Access-Control-Allow-Origin", "*");
 
 		// FIXME: Hide this in iostream.
 		raptor_world* rw = raptor_new_world();
@@ -269,6 +279,7 @@ void connection::operator()(asio::yield_context yield)
 		std::string mime_type = "application/sparql-results+xml";
 		
 		reply.headers().insert(ct);
+		reply.headers().insert(acao);
 
 		rdf::formatter f(res, "", mime_type);
 
