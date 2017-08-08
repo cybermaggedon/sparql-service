@@ -12,6 +12,8 @@ find_package(Boost 1.55 COMPONENTS
   coroutine
   REQUIRED)
 
+find_package(Threads)
+
 # Config
 
 link_directories("${target}" ${Boost_LIBRARIES_DIRS})
@@ -20,6 +22,13 @@ link_directories("${target}" ${Boost_LIBRARIES_DIRS})
 
 set(examples
   "spawn"
+  "regex_router"
+  "basic_router"
+  "spawn-chunked"
+  "spawn-with-runtime"
+  "spawn-with-runtime2"
+  "spawn-fileserver"
+  "spawn-fileserver2"
 )
 
 macro(add_example_target target)
@@ -36,7 +45,13 @@ macro(add_example_target target)
     ${Boost_FILESYSTEM_LIBRARY}
     ${Boost_SYSTEM_LIBRARY}
     ${Boost_COROUTINE_LIBRARY}
-    ${Boost_CONTEXT_LIBRARY})
+    ${Boost_CONTEXT_LIBRARY}
+     ${CMAKE_THREAD_LIBS_INIT})
+
+  #additional libraries for Windows builds
+  if(MSVC OR MINGW)
+      target_link_libraries("${target}" ws2_32 mswsock)
+  endif()
 endmacro()
 
 foreach(example ${examples})

@@ -1,14 +1,15 @@
+
+#define BOOST_HTTP_SOCKET_DEFAULT_BUFFER_SIZE 16384
+
 #include <iostream>
 #include <algorithm>
 
-#include <boost/utility/string_ref.hpp>
-#include <boost/asio/io_service.hpp>
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/signal_set.hpp>
 #include <boost/http/buffered_socket.hpp>
-#include <boost/http/algorithm.hpp>
-#include <boost/property_tree/ptree.hpp>
-#include <boost/property_tree/json_parser.hpp>
+#include <boost/http/algorithm/query.hpp>
+#include <boost/http/request.hpp>
+#include <boost/http/response.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <mutex>
@@ -56,7 +57,7 @@ public:
     }
 
     virtual int write(unsigned char* bytes, unsigned int len) {
-	http::message reply;
+	http::response reply;
 	std::copy(bytes, bytes+len, std::back_inserter(reply.body()));
 	socket.async_write(reply, yield);
 	return 0;
@@ -91,9 +92,7 @@ private:
     http::buffered_socket socket;
     int counter;
 
-    std::string method;
-    std::string path;
-    http::message message;
+    http::request request;
 
 };
 
@@ -105,31 +104,25 @@ void connection::operator()(asio::yield_context yield)
 
 	while (self->socket.is_open()) {
 
-	    std::cerr << "r" << std::endl;
-
 	    // Read request.
-	    self->socket.async_read_request(self->method, self->path,
-					    self->message, yield);
+	    self->socket.async_read_request(self->request, yield);
+//	    self->request.body().clear(); // free unused resources
 		
-	    std::cerr << "s" << std::endl;
-
-
-	    if (http::request_continue_required(self->message)) {
+	    if (http::request_continue_required(self->request)) {
 		// 100-CONTINUE
 		self->socket.async_write_response_continue(yield);
 	    }
-
-	    std::cerr << "Q" << std::endl;
 
 	    while (self->socket.read_state() != http::read_state::empty) {
 		switch (self->socket.read_state()) {
 		case http::read_state::message_ready:
 		    // Read some body.
-		    self->socket.async_read_some(self->message, yield);
+		    self->request.body().clear(); // free unused resources
+		    self->socket.async_read_some(self->request, yield);
 		    break;
 		case http::read_state::body_ready:
 		    // Read trailers.
-		    self->socket.async_read_trailers(self->message, yield);
+		    self->socket.async_read_trailers(self->request, yield);
 		    break;
 		default:;
 		}
@@ -137,23 +130,19 @@ void connection::operator()(asio::yield_context yield)
 
 	    std::string payload;
 
-	    std::cerr << "A" << std::endl;
-	    
-	    if (self->message.body().size() != 0) {
-		std::copy(self->message.body().begin(),
-			  self->message.body().end(),
+	    if (self->request.body().size() != 0) {
+		std::copy(self->request.body().begin(),
+			  self->request.body().end(),
 			  std::back_inserter(payload));
 	    } else {
 
-		std::cerr << "B" << std::endl;
-		EdUrlParser* url = EdUrlParser::parseUrl(self->path);
+		EdUrlParser* url =
+		    EdUrlParser::parseUrl(self->request.target());
 		payload = url->query;
 		delete url;
 
 	    }
 
-	    std::cerr << "C" << std::endl;
-		    
 	    std::vector<query_kv_t> kvs;
 	    int num = EdUrlParser::parseKeyValueList(&kvs, payload);
 
@@ -194,7 +183,7 @@ void connection::operator()(asio::yield_context yield)
 
 	    if (output == "json") {
 
-		http::message reply;
+		http::response reply;
 		
 		std::pair<std::string,std::string>
 		    ct("Content-type",
@@ -211,10 +200,10 @@ void connection::operator()(asio::yield_context yield)
 
 		rdf::formatter f(res, "json", "");
 
-		self->socket.async_write_response_metadata(200,
-							   string_ref("OK"),
-							   reply,
-							   yield);
+		reply.status_code() = 200;
+		reply.reason_phrase() = "OK";
+
+		self->socket.async_write_response_metadata(reply, yield);
 
 		if (callback != "") {
 		    reply.body().clear();
@@ -240,7 +229,7 @@ void connection::operator()(asio::yield_context yield)
 
 		rdf::stream& ntr_strm = res.as_stream();
 
-		http::message reply;
+		http::response reply;
 		
 		std::pair<std::string,std::string>
 		    ct("Content-type",
@@ -260,10 +249,10 @@ void connection::operator()(asio::yield_context yield)
 
 		rdf::serializer serl(*(s.w), "rdfxml");
 
-		self->socket.async_write_response_metadata(200,
-							   string_ref("OK"),
-							   reply,
-							   yield);
+		reply.status_code() = 200;
+		reply.reason_phrase() = "OK";
+
+		self->socket.async_write_response_metadata(reply, yield);
 
 		http_reply_stream strm(rw, self->socket, yield);
 
@@ -273,7 +262,7 @@ void connection::operator()(asio::yield_context yield)
 		    
 	    } else {
 
-		http::message reply;
+		http::response reply;
 		
 		std::pair<std::string,std::string>
 		    ct("Content-type",
@@ -292,10 +281,10 @@ void connection::operator()(asio::yield_context yield)
 
 		rdf::formatter f(res, "", mime_type);
 
-		self->socket.async_write_response_metadata(200,
-							   string_ref("OK"),
-							   reply,
-							   yield);
+		reply.status_code() = 200;
+		reply.reason_phrase() = "OK";
+
+		self->socket.async_write_response_metadata(reply, yield);
 
 		http_reply_stream strm(rw, self->socket, yield);
 
