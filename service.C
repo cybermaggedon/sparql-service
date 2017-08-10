@@ -106,13 +106,13 @@ void connection::operator()(asio::yield_context yield)
 
 	    // Read request.
 	    self->socket.async_read_request(self->request, yield);
-//	    self->request.body().clear(); // free unused resources
 		
 	    if (http::request_continue_required(self->request)) {
 		// 100-CONTINUE
 		self->socket.async_write_response_continue(yield);
 	    }
 
+	    // Receive HTTP header.
 	    while (self->socket.read_state() != http::read_state::empty) {
 		switch (self->socket.read_state()) {
 		case http::read_state::message_ready:
@@ -130,26 +130,27 @@ void connection::operator()(asio::yield_context yield)
 
 	    std::string payload;
 
+	    // If there's body, use it for parameters, otherwise, the
+	    // parameters are in the URL.
 	    if (self->request.body().size() != 0) {
 		std::copy(self->request.body().begin(),
 			  self->request.body().end(),
 			  std::back_inserter(payload));
 	    } else {
-
 		EdUrlParser* url =
 		    EdUrlParser::parseUrl(self->request.target());
 		payload = url->query;
 		delete url;
-
 	    }
 
+	    // Parse parameters for key/value pairs.
 	    std::vector<query_kv_t> kvs;
 	    int num = EdUrlParser::parseKeyValueList(&kvs, payload);
 
+	    // Collect query, output and callback parameters by URL-decoding.
 	    std::string query;
 	    std::string output;
 	    std::string callback;
-
 	    for(int i = 0; i < num; i++) {
 		if (kvs[i].key == "query")
 		    query = EdUrlParser::urlDecode(kvs[i].val);
@@ -159,52 +160,86 @@ void connection::operator()(asio::yield_context yield)
 		    callback = EdUrlParser::urlDecode(kvs[i].val);
 	    }
 
-	    std::cout << "Query: " << query << std::endl;
 	    std::cout << std::endl;
+	    std::cout << "Query: " << query << std::endl;
 
-	    /* Create new query */
-	    rdf::query qry(*(s.w), query, *(s.base_uri));
-
-	    std::cout << "Query executed." << std::endl;
-	    
-	    /* Execute query */
-	    rdf::results& res = qry.execute(*(s.m));
-
-	    std::cout << "Results acquired." << std::endl;
-	
 	    enum { IS_GRAPH, IS_BINDINGS, IS_BOOLEAN } results_type;
 
-	    if (res.is_graph())
+	    std::shared_ptr<rdf::query> qry;
+	    std::shared_ptr<rdf::results> res;
+
+	    try {
+
+		/* Create new query */
+		qry = std::make_shared<rdf::query>(rdf::query(*(s.w), query, *(s.base_uri)));
+		std::cout << "Query executed." << std::endl;
+	    
+		/* Execute query */
+		
+		res = qry->execute(*(s.m));
+
+		std::cout << "Results acquired." << std::endl;
+
+	    } catch (std::exception& e) {
+
+		http::response reply;
+
+		reply.status_code() = 500;
+		reply.reason_phrase() = "Internal Server Error";
+
+		std::pair<std::string,std::string>
+		    ct("Content-type", "text/plain");
+
+		reply.headers().insert(ct);
+
+		self->socket.async_write_response_metadata(reply, yield);
+		    
+		reply.body().clear();
+
+		std::string err = e.what();
+		
+		std::copy(err.begin(), err.end(),
+			  std::back_inserter(reply.body()));
+
+		socket.async_write(reply, yield);
+
+		self->socket.async_write_end_of_message( yield);
+
+		return;
+
+	    }
+	
+	    if (res->is_graph())
 		results_type = IS_GRAPH;
-	    else if (res.is_bindings())
+	    else if (res->is_bindings())
 		results_type = IS_BINDINGS;
-	    if (res.is_boolean())
+	    if (res->is_boolean())
 		results_type = IS_BOOLEAN;
 
 	    if (output == "json") {
 
 		http::response reply;
-		
+
 		std::pair<std::string,std::string>
 		    ct("Content-type",
 		       "application/sparql-results+json");
-
+		
 		std::pair<std::string,std::string>
 		    acao("Access-Control-Allow-Origin", "*");
-
-		// FIXME: Hide this in iostream.
-		raptor_world* rw = raptor_new_world();
 		
 		reply.headers().insert(ct);
 		reply.headers().insert(acao);
 
-		rdf::formatter f(res, "json", "");
-
+		// FIXME: Hide this in iostream.
+		raptor_world* rw = raptor_new_world();
+		
+		rdf::formatter f(*res, "json", "");
+		
 		reply.status_code() = 200;
 		reply.reason_phrase() = "OK";
 
 		self->socket.async_write_response_metadata(reply, yield);
-
+		
 		if (callback != "") {
 		    reply.body().clear();
 		    std::copy(callback.begin(), callback.end(),
@@ -212,10 +247,10 @@ void connection::operator()(asio::yield_context yield)
 		    reply.body().push_back('(');
 		    socket.async_write(reply, yield);
 		}
-
+		
 		http_reply_stream strm(rw, self->socket, yield);
 
-		f.write(strm, res);
+		f.write(strm, *res);
 
 		if (callback != "") {
 		    reply.body().clear();
@@ -226,42 +261,42 @@ void connection::operator()(asio::yield_context yield)
 		self->socket.async_write_end_of_message( yield);
 
 	    } else if (results_type == IS_GRAPH) {
-
-		rdf::stream& ntr_strm = res.as_stream();
-
+		
+		std::shared_ptr<rdf::stream> ntr_strm = res->as_stream();
+		
 		http::response reply;
 		
 		std::pair<std::string,std::string>
 		    ct("Content-type",
 		       "application/sparql-results+xml");
-
+		
 		std::pair<std::string,std::string>
 		    acao("Access-Control-Allow-Origin", "*");
-
+		
 		// FIXME: Hide this in iostream.
 		// FIXME: raptor_world is leaked.
 		raptor_world* rw = raptor_new_world();
-
+		
 		std::string mime_type = "application/sparql-results+xml";
 		
 		reply.headers().insert(ct);
 		reply.headers().insert(acao);
-
+		
 		rdf::serializer serl(*(s.w), "rdfxml");
-
+		
 		reply.status_code() = 200;
 		reply.reason_phrase() = "OK";
-
+		
 		self->socket.async_write_response_metadata(reply, yield);
-
+		
 		http_reply_stream strm(rw, self->socket, yield);
-
+		
 		serl.write_stream_to_iostream(ntr_strm, strm);
 		
 		self->socket.async_write_end_of_message(yield);
-		    
+		
 	    } else {
-
+		
 		http::response reply;
 		
 		std::pair<std::string,std::string>
@@ -279,7 +314,7 @@ void connection::operator()(asio::yield_context yield)
 		reply.headers().insert(ct);
 		reply.headers().insert(acao);
 
-		rdf::formatter f(res, "", mime_type);
+		rdf::formatter f(*res, "", mime_type);
 
 		reply.status_code() = 200;
 		reply.reason_phrase() = "OK";
@@ -288,12 +323,11 @@ void connection::operator()(asio::yield_context yield)
 
 		http_reply_stream strm(rw, self->socket, yield);
 
-		f.write(strm, res);
+		f.write(strm, *res);
 
 		self->socket.async_write_end_of_message( yield);
 
 	    }
-
 		    
 	    return;
 
