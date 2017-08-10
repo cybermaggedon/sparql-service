@@ -1,0 +1,15 @@
+[[algorithm_header]]
+==== `<boost/http/algorithm.hpp>`
+
+A shorthand to write:
+
+[source,cpp]
+----
+#include <boost/http/algorithm/header.hpp>
+#include <boost/http/algorithm/query.hpp>
+----
+
+===== See also
+
+* <<header_header,`<boost/http/algorithm/header.hpp>`>>
+* <<query_header,`<boost/http/algorithm/query.hpp>`>>

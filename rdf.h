@@ -3,6 +3,7 @@
 #define RDF_H
 
 #include <redland.h>
+#include <memory>
 
 namespace rdf {
 
@@ -107,11 +108,12 @@ namespace rdf {
 		throw std::runtime_error("Could not get serialiser.");
 	}
 
-	void write_stream_to_iostream(stream& s, rdf::iostream& out) {
+	void write_stream_to_iostream(std::shared_ptr<stream> s,
+				      rdf::iostream& out) {
 	    int ret =
 		librdf_serializer_serialize_stream_to_iostream(ser,
 							       0,
-							       s.str,
+							       s->str,
 							       out.strm);
 		if (ret < 0)
 		    throw std::runtime_error("Serialisation failed.");
@@ -130,14 +132,10 @@ namespace rdf {
     class results {
       public:
 	librdf_query_results* res;
-	stream* strm;
 	world& w;
         results(world& w, librdf_query_results* res) : w(w), res(res) {
-	    strm = 0;
 	}
 	~results() {
-	    if (strm)
-		delete strm;
 	    if (res)
 		librdf_free_query_results(res);
 	}
@@ -151,13 +149,12 @@ namespace rdf {
 	    return librdf_query_results_is_boolean(res) != 0;
 	}
 
-	stream& as_stream() {
+	std::shared_ptr<stream> as_stream() {
 	    librdf_stream* str = librdf_query_results_as_stream(res);
 	    if (str == 0)
 		throw std::runtime_error("Could not get results as stream.");
 
-	    strm = new stream(str);
-	    return *strm;
+	    return std::shared_ptr<stream>(new stream(str));
 	}
 	    
     };
@@ -166,25 +163,22 @@ namespace rdf {
       public:
 	librdf_query* q;
 	world& w;
-	results* res;
         query(world& w, const std::string& qry, uri& u) :
 	w(w) {
 	    const unsigned char* qs =
 		reinterpret_cast<const unsigned char*>(qry.c_str());
 	    q = librdf_new_query(w.w, "sparql", 0, qs, u.u);
-	    res = 0;
 	    if (q == 0)
 		throw std::runtime_error("Couldn't create query");
 	}
-	results& execute(model& m) {
+	std::shared_ptr<results> execute(model& m) {
 	    librdf_query_results* r = librdf_query_execute(q, m.m);
 	    if (r == nullptr)
 		throw std::runtime_error("Query execution failed");
-	    res = new results(w, r);
-	    return *res;
+	    std::shared_ptr<results> res = std::make_shared<results>(w, r);
+	    return res;
 	}
 	~query() {
-	    if (res) delete res;
 	}
 
     };

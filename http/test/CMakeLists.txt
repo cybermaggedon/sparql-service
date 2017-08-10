@@ -45,6 +45,8 @@ set(tests11
   "traits"
   "file_server"
   "request11"
+  "routing"
+  "request_response_wrapper"
 )
 
 macro(add_test_target target version)

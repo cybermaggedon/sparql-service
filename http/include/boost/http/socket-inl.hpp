@@ -55,16 +55,15 @@ asio::io_service &basic_socket<Socket>::get_io_service()
 }
 
 template<class Socket>
-template<class String, class Message, class CompletionToken>
+template<class Request, class CompletionToken>
 typename asio::async_result<
     typename asio::handler_type<CompletionToken,
                                 void(system::error_code)>::type>::type
-basic_socket<Socket>
-::async_read_request(String &method, String &path, Message &message,
-                     CompletionToken &&token)
+basic_socket<Socket>::async_read_request(Request &request,
+                                         CompletionToken &&token)
 {
-    static_assert(is_message<Message>::value,
-                  "Message must fulfill the Message concept");
+    static_assert(is_request_message<Request>::value,
+                  "Request must fulfill the Request concept");
 
     typedef typename asio::handler_type<
         CompletionToken, void(system::error_code)>::type Handler;
@@ -79,11 +78,12 @@ basic_socket<Socket>
         return result.get();
     }
 
-    method.clear();
-    path.clear();
-    clear_message(message);
+    request.method().clear();
+    request.target().clear();
+    clear_message(request);
     writer_helper = http::write_state::finished;
-    schedule_on_async_read_message<READY>(handler, message, &method, &path);
+    schedule_on_async_read_message<READY>(handler, request, &request.method(),
+                                          &request.target());
 
     return result.get();
 }
@@ -146,17 +146,15 @@ basic_socket<Socket>::async_read_trailers(Message &message,
 }
 
 template<class Socket>
-template<class StringRef, class Message, class CompletionToken>
+template<class Response, class CompletionToken>
 typename asio::async_result<
     typename asio::handler_type<CompletionToken,
                                 void(system::error_code)>::type>::type
 basic_socket<Socket>
-::async_write_response(std::uint_fast16_t status_code,
-                       const StringRef &reason_phrase, const Message &message,
-                       CompletionToken &&token)
+::async_write_response(const Response &response, CompletionToken &&token)
 {
-    static_assert(is_message<Message>::value,
-                  "Message must fulfill the Message concept");
+    static_assert(is_response_message<Response>::value,
+                  "Response must fulfill the Response concept");
 
     using detail::string_literal_buffer;
     typedef typename asio::handler_type<
@@ -164,6 +162,10 @@ basic_socket<Socket>
 
     Handler handler(std::forward<CompletionToken>(token));
     asio::async_result<Handler> result(handler);
+
+    const auto status_code = response.status_code();
+    const auto &reason_phrase = response.reason_phrase();
+    const auto &headers = response.headers();
 
     if (!writer_helper.write_message()) {
         invoke_handler(std::forward<decltype(handler)>(handler),
@@ -174,10 +176,10 @@ basic_socket<Socket>
     auto crlf = string_literal_buffer("\r\n");
     auto sep = string_literal_buffer(": ");
     bool implicit_content_length
-        = (message.headers().find("content-length") != message.headers().end())
+        = (headers.find("content-length") != headers.end())
         || (status_code / 100 == 1) || (status_code == 204)
         || (connect_request && (status_code / 100 == 2));
-    auto has_connection_close = detail::has_connection_close(message.headers());
+    auto has_connection_close = detail::has_connection_close(headers);
 
     if (has_connection_close)
         keep_alive = KEEP_ALIVE_CLOSE_READ;
@@ -192,7 +194,7 @@ basic_socket<Socket>
 
     // because we don't create multiple responses at once with HTTP/1.1
     // pipelining, it's safe to use this "shared state"
-    content_length_buffer += std::to_string(message.body().size());
+    content_length_buffer += std::to_string(response.body().size());
 
     const auto nbuffer_pieces =
         // Start line (http version + status code + reason phrase) + CRLF
@@ -201,7 +203,7 @@ basic_socket<Socket>
         // If user didn't provided "connection: close"
         + (use_connection_close_buf ? 1 : 0)
         // Each header is 4 buffer pieces: key + sep + value + crlf
-        + 4 * message.headers().size()
+        + 4 * headers.size()
         // Extra content-length header uses 3 pieces
         + (implicit_content_length ? 0 : 3)
         // Extra CRLF for end of headers
@@ -223,7 +225,7 @@ basic_socket<Socket>
     if (use_connection_close_buf)
         buffers.push_back(string_literal_buffer("connection: close\r\n"));
 
-    for (const auto &header: message.headers()) {
+    for (const auto &header: headers) {
         buffers.push_back(asio::buffer(header.first));
         buffers.push_back(sep);
         buffers.push_back(asio::buffer(header.second));
@@ -242,14 +244,14 @@ basic_socket<Socket>
     buffers.push_back(crlf);
 
     if (!implicit_content_length)
-        buffers.push_back(asio::buffer(message.body()));
+        buffers.push_back(asio::buffer(response.body()));
 
     asio::async_write(channel, buffers,
                       [handler,this]
                       (const system::error_code &ec, std::size_t) mutable {
         is_open_ = keep_alive == KEEP_ALIVE_KEEP_ALIVE_READ;
         if (!is_open_)
-            channel.close();
+            channel.lowest_layer().close();
         handler(ec);
     });
 
@@ -289,17 +291,16 @@ basic_socket<Socket>
 }
 
 template<class Socket>
-template<class StringRef, class Message, class CompletionToken>
+template<class Response, class CompletionToken>
 typename asio::async_result<
     typename asio::handler_type<CompletionToken,
                                 void(system::error_code)>::type>::type
 basic_socket<Socket>
-::async_write_response_metadata(std::uint_fast16_t status_code,
-                                const StringRef &reason_phrase,
-                                const Message &message, CompletionToken &&token)
+::async_write_response_metadata(const Response &response,
+                                CompletionToken &&token)
 {
-    static_assert(is_message<Message>::value,
-                  "Message must fulfill the Message concept");
+    static_assert(is_response_message<Response>::value,
+                  "Response must fulfill the Response concept");
 
     using detail::string_literal_buffer;
     typedef typename asio::handler_type<
@@ -308,6 +309,10 @@ basic_socket<Socket>
     Handler handler(std::forward<CompletionToken>(token));
 
     asio::async_result<Handler> result(handler);
+
+    const auto status_code = response.status_code();
+    const auto &reason_phrase = response.reason_phrase();
+    const auto &headers = response.headers();
 
     {
         auto prev = writer_helper.state;
@@ -327,7 +332,7 @@ basic_socket<Socket>
 
     auto crlf = string_literal_buffer("\r\n");
     auto sep = string_literal_buffer(": ");
-    auto has_connection_close = detail::has_connection_close(message.headers());
+    auto has_connection_close = detail::has_connection_close(headers);
 
     if (has_connection_close)
         keep_alive = KEEP_ALIVE_CLOSE_READ;
@@ -346,7 +351,7 @@ basic_socket<Socket>
         // If user didn't provided "connection: close"
         + (use_connection_close_buf ? 1 : 0)
         // Each header is 4 buffer pieces: key + sep + value + crlf
-        + 4 * message.headers().size()
+        + 4 * headers.size()
         // Extra transfer-encoding header and extra CRLF for end of headers
         + 1;
 
@@ -363,7 +368,7 @@ basic_socket<Socket>
     if (use_connection_close_buf)
         buffers.push_back(string_literal_buffer("connection: close\r\n"));
 
-    for (const auto &header: message.headers()) {
+    for (const auto &header: headers) {
         buffers.push_back(asio::buffer(header.first));
         buffers.push_back(sep);
         buffers.push_back(asio::buffer(header.second));
@@ -496,7 +501,7 @@ basic_socket<Socket>::async_write_trailers(const Message &message,
                       (const system::error_code &ec, std::size_t) mutable {
         is_open_ = keep_alive == KEEP_ALIVE_KEEP_ALIVE_READ;
         if (!is_open_)
-            channel.close();
+            channel.lowest_layer().close();
         handler(ec);
     });
 
@@ -532,7 +537,7 @@ basic_socket<Socket>
                       (const system::error_code &ec, std::size_t) mutable {
         is_open_ = keep_alive == KEEP_ALIVE_KEEP_ALIVE_READ;
         if (!is_open_)
-            channel.close();
+            channel.lowest_layer().close();
         handler(ec);
     });
 
@@ -612,6 +617,8 @@ void basic_socket<Socket>
                         Message &message, const system::error_code &ec,
                         std::size_t bytes_transferred)
 {
+    using detail::string_literal_buffer;
+
     if (ec) {
         clear_buffer();
         handler(ec);
@@ -649,15 +656,104 @@ void basic_socket<Socket>
             BOOST_HTTP_DETAIL_UNREACHABLE("client API not implemented yet");
             break;
         case token::code::error_invalid_data:
-        case token::code::error_no_host:
-        case token::code::error_invalid_content_length:
-        case token::code::error_content_length_overflow:
-        case token::code::error_invalid_transfer_encoding:
-        case token::code::error_chunk_size_overflow:
-            // TODO: send HTTP reply before proceeding
             {
                 clear_buffer();
-                handler(system::error_code(http_errc::parsing_error));
+
+                auto error_message
+                    = string_literal_buffer("HTTP/1.1 400 Bad Request\r\n"
+                                            "Content-Length: 13\r\n"
+                                            "Connection: close\r\n"
+                                            "\r\n"
+                                            "Invalid data\n");
+                asio::async_write(channel, asio::buffer(error_message),
+                                  [this,handler](system::error_code
+                                                 /*ignored_ec*/,
+                                                 std::size_t
+                                                 /*bytes_transferred*/)
+                                  mutable {
+                                      handler(http_errc::parsing_error);
+                                  });
+                return;
+            }
+        case token::code::error_no_host:
+            {
+                clear_buffer();
+
+                auto error_message
+                    = string_literal_buffer("HTTP/1.1 400 Bad Request\r\n"
+                                            "Content-Length: 13\r\n"
+                                            "Connection: close\r\n"
+                                            "\r\n"
+                                            "Host missing\n");
+                asio::async_write(channel, asio::buffer(error_message),
+                                  [this,handler](system::error_code
+                                                 /*ignored_ec*/,
+                                                 std::size_t
+                                                 /*bytes_transferred*/)
+                                  mutable {
+                                      handler(http_errc::parsing_error);
+                                  });
+                return;
+            }
+        case token::code::error_invalid_content_length:
+        case token::code::error_content_length_overflow:
+            {
+                clear_buffer();
+
+                auto error_message
+                    = string_literal_buffer("HTTP/1.1 400 Bad Request\r\n"
+                                            "Content-Length: 23\r\n"
+                                            "Connection: close\r\n"
+                                            "\r\n"
+                                            "Invalid content-length\n");
+                asio::async_write(channel, asio::buffer(error_message),
+                                  [this,handler](system::error_code
+                                                 /*ignored_ec*/,
+                                                 std::size_t
+                                                 /*bytes_transferred*/)
+                                  mutable {
+                                      handler(http_errc::parsing_error);
+                                  });
+                return;
+            }
+        case token::code::error_invalid_transfer_encoding:
+            {
+                clear_buffer();
+
+                auto error_message
+                    = string_literal_buffer("HTTP/1.1 400 Bad Request\r\n"
+                                            "Content-Length: 25\r\n"
+                                            "Connection: close\r\n"
+                                            "\r\n"
+                                            "Invalid transfer-encoding\n");
+                asio::async_write(channel, asio::buffer(error_message),
+                                  [this,handler](system::error_code
+                                                 /*ignored_ec*/,
+                                                 std::size_t
+                                                 /*bytes_transferred*/)
+                                  mutable {
+                                      handler(http_errc::parsing_error);
+                                  });
+                return;
+            }
+        case token::code::error_chunk_size_overflow:
+            {
+                clear_buffer();
+
+                auto error_message
+                    = string_literal_buffer("HTTP/1.1 400 Bad Request\r\n"
+                                            "Content-Length: 25\r\n"
+                                            "Connection: close\r\n"
+                                            "\r\n"
+                                            "Can't process chunk size\n");
+                asio::async_write(channel, asio::buffer(error_message),
+                                  [this,handler](system::error_code
+                                                 /*ignored_ec*/,
+                                                 std::size_t
+                                                 /*bytes_transferred*/)
+                                  mutable {
+                                      handler(http_errc::parsing_error);
+                                  });
                 return;
             }
         case token::code::skip:
