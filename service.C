@@ -1,4 +1,5 @@
 
+// This is the buffer size for the received HTTP message.
 #define BOOST_HTTP_SOCKET_DEFAULT_BUFFER_SIZE 16384
 
 #include <iostream>
@@ -25,6 +26,7 @@ using namespace boost;
 #define BASE_URI "https://github.com/cybermaggedon/"
 #endif
 
+// SPARQL state, handles to the store etc.
 class sparql {
 public:
     rdf::world* w;
@@ -45,6 +47,8 @@ public:
     }
 };
 
+// Used to connect a Redland thing which outputs on an iostream to the HTTP
+// socket so that data is streamed back as an HTTP response.
 class http_reply_stream : public rdf::iostream {
 private:
     boost::asio::yield_context& yield;
@@ -65,48 +69,56 @@ public:
     
 };
 
+// An HTTP connection
 class connection: public std::enable_shared_from_this<connection>
 {
 private:
     sparql& s;
 public:
+
+    // This is the handler for a connection
     void operator()(asio::yield_context yield);
 
+    // Returns the TCP layer socket.
     asio::ip::tcp::socket &tcp_layer() {
 	return socket.next_layer();
     }
 
+    // Creates a new object when an HTTP connection is received.
     static std::shared_ptr<connection> make_connection(asio::io_service &ios,
-                                                       int counter,
 						       sparql& s) {
-	return std::shared_ptr<connection>{new connection{ios, counter, s}};
+	return std::shared_ptr<connection>{new connection{ios, s}};
     }
 
 private:
 
-    connection(asio::io_service &ios, int counter, sparql& s)
+    // Constructor.
+    connection(asio::io_service &ios, sparql& s)
         : socket(ios)
-        , counter(counter)
 	, s(s) {}
 
+    // The HTTP socket.
     http::buffered_socket socket;
-    int counter;
 
+    // Incoming HTTP request.
     http::request request;
 
 };
 
+// HTTP connection body
 void connection::operator()(asio::yield_context yield)
 {
 
     auto self = shared_from_this();
     try {
 
+	// Keep going while socket is open.
 	while (self->socket.is_open()) {
 
 	    // Read request.
 	    self->socket.async_read_request(self->request, yield);
-		
+
+	    // Handle 100-CONTINUE case.
 	    if (http::request_continue_required(self->request)) {
 		// 100-CONTINUE
 		self->socket.async_write_response_continue(yield);
@@ -128,10 +140,9 @@ void connection::operator()(asio::yield_context yield)
 		}
 	    }
 
-	    std::string payload;
-
 	    // If there's body, use it for parameters, otherwise, the
 	    // parameters are in the URL.
+	    std::string payload;
 	    if (self->request.body().size() != 0) {
 		std::copy(self->request.body().begin(),
 			  self->request.body().end(),
@@ -175,40 +186,44 @@ void connection::operator()(asio::yield_context yield)
 		std::cout << "Query executed." << std::endl;
 	    
 		/* Execute query */
-		
 		res = qry->execute(*(s.m));
 
 		std::cout << "Results acquired." << std::endl;
 
 	    } catch (std::exception& e) {
 
+		// If there's an exception, that's a 500 error.
 		http::response reply;
 
+		// Status code and response.
 		reply.status_code() = 500;
 		reply.reason_phrase() = "Internal Server Error";
 
+		// Add text/plain content type
 		std::pair<std::string,std::string>
 		    ct("Content-type", "text/plain");
-
 		reply.headers().insert(ct);
 
+		// Write start of response.
 		self->socket.async_write_response_metadata(reply, yield);
-		    
-		reply.body().clear();
 
+		// Payload is the exception text.
+		reply.body().clear();
 		std::string err = e.what();
-		
 		std::copy(err.begin(), err.end(),
 			  std::back_inserter(reply.body()));
 
+		// Write exception text.
 		socket.async_write(reply, yield);
 
+		// End of response.
 		self->socket.async_write_end_of_message( yield);
 
 		return;
 
 	    }
-	
+
+	    // Work out results type.
 	    if (res->is_graph())
 		results_type = IS_GRAPH;
 	    else if (res->is_bindings())
@@ -216,30 +231,37 @@ void connection::operator()(asio::yield_context yield)
 	    if (res->is_boolean())
 		results_type = IS_BOOLEAN;
 
+	    // If output is JSON...
 	    if (output == "json") {
 
+		// Reply to be constructed.
 		http::response reply;
 
+		// Add SPARQL results JSON content type header.
 		std::pair<std::string,std::string>
 		    ct("Content-type",
 		       "application/sparql-results+json");
-		
+		reply.headers().insert(ct);
+
+		// Allows access from JavaScript outside of the domain.
 		std::pair<std::string,std::string>
 		    acao("Access-Control-Allow-Origin", "*");
-		
-		reply.headers().insert(ct);
 		reply.headers().insert(acao);
 
 		// FIXME: Hide this in iostream.
 		raptor_world* rw = raptor_new_world();
-		
+
+		// Create a results formatter for JSON data.
 		rdf::formatter f(*res, "json", "");
-		
+
+		// Response code 200 OK.
 		reply.status_code() = 200;
 		reply.reason_phrase() = "OK";
 
+		// Start writing HTTP response.
 		self->socket.async_write_response_metadata(reply, yield);
-		
+
+		// If using JSONP, return callback(X) instead of X.
 		if (callback != "") {
 		    reply.body().clear();
 		    std::copy(callback.begin(), callback.end(),
@@ -247,7 +269,8 @@ void connection::operator()(asio::yield_context yield)
 		    reply.body().push_back('(');
 		    socket.async_write(reply, yield);
 		}
-		
+
+		// Create an HTTP response streamer.
 		http_reply_stream strm(rw, self->socket, yield);
 
 		f.write(strm, *res);
@@ -258,6 +281,7 @@ void connection::operator()(asio::yield_context yield)
 		    socket.async_write(reply, yield);
 		}
 
+		// End of response.
 		self->socket.async_write_end_of_message( yield);
 
 	    } else if (results_type == IS_GRAPH) {
@@ -266,10 +290,12 @@ void connection::operator()(asio::yield_context yield)
 		
 		http::response reply;
 		
+		// Add text/plain content type
 		std::pair<std::string,std::string>
 		    ct("Content-type",
 		       "application/sparql-results+xml");
 		
+		// Allows access from JavaScript outside of the domain.
 		std::pair<std::string,std::string>
 		    acao("Access-Control-Allow-Origin", "*");
 		
@@ -284,25 +310,30 @@ void connection::operator()(asio::yield_context yield)
 		
 		rdf::serializer serl(*(s.w), "rdfxml");
 		
+		// Response code 200 OK.
 		reply.status_code() = 200;
 		reply.reason_phrase() = "OK";
 		
+		// Start writing HTTP response.
 		self->socket.async_write_response_metadata(reply, yield);
 		
+		// Create an HTTP response streamer and write.
 		http_reply_stream strm(rw, self->socket, yield);
-		
 		serl.write_stream_to_iostream(ntr_strm, strm);
 		
+		// End of response.
 		self->socket.async_write_end_of_message(yield);
 		
 	    } else {
 		
 		http::response reply;
 		
+		// Add text/plain content type
 		std::pair<std::string,std::string>
 		    ct("Content-type",
 		       "application/sparql-results+xml");
 
+		// Allows access from JavaScript outside of the domain.
 		std::pair<std::string,std::string>
 		    acao("Access-Control-Allow-Origin", "*");
 
@@ -316,15 +347,18 @@ void connection::operator()(asio::yield_context yield)
 
 		rdf::formatter f(*res, "", mime_type);
 
+		// Response code 200 OK.
 		reply.status_code() = 200;
 		reply.reason_phrase() = "OK";
 
+		// Start writing HTTP response.
 		self->socket.async_write_response_metadata(reply, yield);
 
+		// Create an HTTP response streamer and write.
 		http_reply_stream strm(rw, self->socket, yield);
-
 		f.write(strm, *res);
 
+		// End of response.
 		self->socket.async_write_end_of_message( yield);
 
 	    }
@@ -378,12 +412,11 @@ int main(int argc, char** argv)
     signals.async_wait(signal_handler);
 
     auto work = [&acceptor, &s](asio::yield_context yield) {
-        int counter = 0;
-        for ( ; true ; ++counter ) {
+        for ( ; true ; ) {
             try {
                 auto connection
                     = connection::make_connection(acceptor.get_io_service(),
-                                                  counter, s);
+                                                  s);
                 acceptor.async_accept(connection->tcp_layer(), yield);
 
                 auto handle_connection
