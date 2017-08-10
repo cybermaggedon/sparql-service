@@ -3,6 +3,7 @@
 #define RDF_H
 
 #include <redland.h>
+#include <memory>
 
 namespace rdf {
 
