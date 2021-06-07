@@ -37,10 +37,16 @@ namespace rdf {
 		throw std::runtime_error("Write failed.");
 	}
 
-	virtual int write(unsigned char* bytes, unsigned int len) {}
+	virtual int write(unsigned char* bytes, unsigned int len) {
+	    return 0;
+	}
 	virtual void write_end() {}
-	virtual int read(unsigned char* bytes, unsigned int len) {}
-	virtual bool read_eof() {}
+	virtual int read(unsigned char* bytes, unsigned int len) {
+	    return -1;
+	}
+	virtual bool read_eof() {
+	    return true;
+	}
 
     };
 

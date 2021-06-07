@@ -7,6 +7,7 @@
 
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/signal_set.hpp>
+#include <boost/asio/io_service.hpp>
 #include <boost/http/buffered_socket.hpp>
 #include <boost/http/algorithm/query.hpp>
 #include <boost/http/request.hpp>
@@ -174,6 +175,12 @@ void connection::operator()(asio::yield_context yield)
 	    std::cout << std::endl;
 	    std::cout << "Query: " << query << std::endl;
 
+	    // Gets CORS Origin header
+	    std::string origin;
+	    auto iter = self->request.headers().find("origin");
+	    if (iter != self->request.headers().end())
+		origin = iter->second;
+
 	    enum { IS_GRAPH, IS_BINDINGS, IS_BOOLEAN } results_type;
 
 	    std::shared_ptr<rdf::query> qry;
@@ -203,6 +210,13 @@ void connection::operator()(asio::yield_context yield)
 		std::pair<std::string,std::string>
 		    ct("Content-type", "text/plain");
 		reply.headers().insert(ct);
+
+		// Allows access from JavaScript outside of the domain.
+		if (origin != "") {
+		    std::pair<std::string,std::string>
+			acao("Access-Control-Allow-Origin", origin);
+		    reply.headers().insert(acao);
+		}
 
 		// Write start of response.
 		self->socket.async_write_response_metadata(reply, yield);
@@ -244,9 +258,11 @@ void connection::operator()(asio::yield_context yield)
 		reply.headers().insert(ct);
 
 		// Allows access from JavaScript outside of the domain.
-		std::pair<std::string,std::string>
-		    acao("Access-Control-Allow-Origin", "*");
-		reply.headers().insert(acao);
+		if (origin != "") {
+		    std::pair<std::string,std::string>
+			acao("Access-Control-Allow-Origin", origin);
+		    reply.headers().insert(acao);
+		}
 
 		// FIXME: Hide this in iostream.
 		raptor_world* rw = raptor_new_world();
@@ -294,19 +310,21 @@ void connection::operator()(asio::yield_context yield)
 		std::pair<std::string,std::string>
 		    ct("Content-type",
 		       "application/sparql-results+xml");
-		
-		// Allows access from JavaScript outside of the domain.
-		std::pair<std::string,std::string>
-		    acao("Access-Control-Allow-Origin", "*");
-		
+
 		// FIXME: Hide this in iostream.
 		// FIXME: raptor_world is leaked.
 		raptor_world* rw = raptor_new_world();
 		
 		std::string mime_type = "application/sparql-results+xml";
 		
+		// Allows access from JavaScript outside of the domain.
+		if (origin != "") {
+		    std::pair<std::string,std::string>
+			acao("Access-Control-Allow-Origin", origin);
+		    reply.headers().insert(acao);
+		}
+
 		reply.headers().insert(ct);
-		reply.headers().insert(acao);
 		
 		rdf::serializer serl(*(s.w), "rdfxml");
 		
@@ -333,17 +351,19 @@ void connection::operator()(asio::yield_context yield)
 		    ct("Content-type",
 		       "application/sparql-results+xml");
 
-		// Allows access from JavaScript outside of the domain.
-		std::pair<std::string,std::string>
-		    acao("Access-Control-Allow-Origin", "*");
-
 		// FIXME: Hide this in iostream.
 		raptor_world* rw = raptor_new_world();
 
 		std::string mime_type = "application/sparql-results+xml";
 		
 		reply.headers().insert(ct);
-		reply.headers().insert(acao);
+
+		// Allows access from JavaScript outside of the domain.
+		if (origin != "") {
+		    std::pair<std::string,std::string>
+			acao("Access-Control-Allow-Origin", origin);
+		    reply.headers().insert(acao);
+		}
 
 		rdf::formatter f(*res, "", mime_type);
 
