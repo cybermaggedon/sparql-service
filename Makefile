@@ -1,6 +1,6 @@
 
 CXXFLAGS += -I/usr/include/raptor2 -I/usr/include/rasqal -g
-CXXFLAGS += -Ihttp/include -Inetmindms -std=c++11
+CXXFLAGS += -Iboost.http/include -Inetmindms -std=c++14
 
 LIBS=-lpthread -lboost_system -lboost_coroutine -lrdf -lraptor2
 

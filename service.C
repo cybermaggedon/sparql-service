@@ -10,6 +10,7 @@
 #include <boost/beast/version.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/buffer.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <mutex>
@@ -63,21 +64,29 @@ public:
 // socket so that data is streamed back as an HTTP response.
 template<class Sender>
 class http_reply_stream : public rdf::iostream {
+
 private:
-    Sender& socket;
+    Sender& sender;
 
 public:
-    http_reply_stream(raptor_world* rw, Sender& socket) :
-	socket(socket), iostream(rw) {
+    http_reply_stream(raptor_world* rw, Sender& sender) :
+	sender(sender), iostream(rw) {
     }
 
     virtual int write(unsigned char* bytes, unsigned int len) {
-	// FIXME: This right?
-	socket.write(bytes, len);
+	auto buf = asio::const_buffer(static_cast<void *>(bytes), len);
+	net::write(sender, http::make_chunk(buf));
 	return 0;
     }
     
+    virtual void write_end() {
+	net::write(sender, http::make_chunk_last());
+    }
+    
 };
+
+//struct session;
+//struct send_lambda;
 
 /*
 // An HTTP connection
@@ -405,6 +414,26 @@ void connection::operator()(asio::yield_context yield)
 */
 //------------------------------------------------------------------------------
 
+struct session;
+
+    // This is the C++11 equivalent of a generic lambda.
+    // The function object is used to send an HTTP message.
+    struct send_lambda
+    {
+        session& self_;
+
+        explicit
+        send_lambda(session& self)
+            : self_(self)
+        {
+        }
+
+        template<bool isRequest, class Body, class Fields>
+        void
+        operator()(http::message<isRequest, Body, Fields>&& msg) const;
+
+    };
+
 // This function produces an HTTP response for the given
 // request. The type of the response object depends on the
 // contents of the request, so the interface requires the
@@ -550,7 +579,7 @@ handle_request(
 		    http::status::ok,
 		    11
 		};
-
+		
 		res.set(http::field::server, "sparql-service 1.1");
 		res.set(http::field::content_type,
 			"application/sparql-results+json");
@@ -578,19 +607,26 @@ handle_request(
 
 		// If using JSONP, return callback(X) instead of X.
 		if (callback != "") {
-//		    send.write(callback);
-//		    net::write(
-		    http::write(send, http::make_chunk(callback), ec);
-		    http::write(send, http::make_chunk("("), ec);
+		    std::string part = callback + "(";
+		    auto buf =
+			asio::const_buffer(
+			    static_cast<const void *>(part.c_str()),
+			    part.size());
+		    net::write(send, http::make_chunk(buf));
 		}
 
 		// Create an HTTP response streamer.
-		http_reply_stream<tcp::endpoint> strm(rw, send);
+		http_reply_stream<send_lambda&> strm(rw, send);
 
 		f.write(strm, *results);
 
 		if (callback != "") {
-		    send.write(")");
+		    std::string part = ")";
+		    auto buf =
+			asio::const_buffer(
+			    static_cast<const void *>(part.c_str()),
+			    part.size());
+		    net::write(send, http::make_chunk(buf));
 		}
 
 		// End of response.
@@ -628,7 +664,7 @@ handle_request(
 		http::write_header(send, sr);
 
 		// Create an HTTP response streamer and write.
-		http_reply_stream<tcp::endpoint> strm(rw, send);
+		http_reply_stream<send_lambda&> strm(rw, send);
 
 		serl.write_stream_to_iostream(ntr_strm, strm);
 		
@@ -658,7 +694,7 @@ handle_request(
 
 		std::string mime_type = "application/sparql-results+xml";
 		
-		rdf::formatter f(res, "", mime_type);
+		rdf::formatter f(*results, "", mime_type);
 
 		// Set up serialiser
 		http::response_serializer<http::empty_body> sr{res};
@@ -667,7 +703,7 @@ handle_request(
 		http::write_header(send, sr);
 
 		// Create an HTTP response streamer and write.
-		http_reply_stream<tcp::endpoint> strm(rw, send);
+		http_reply_stream<send_lambda&> strm(rw, send);
 
 		f.write(strm, *results);
 
@@ -713,6 +749,15 @@ handle_request(
 // Handles an HTTP server connection
 class session : public std::enable_shared_from_this<session>
 {
+public:
+    beast::tcp_stream stream_;
+    beast::flat_buffer buffer_;
+    http::request<http::string_body> req_;
+    std::shared_ptr<void> res_;
+    send_lambda lambda_;
+
+    sparql* s;
+/*
     // This is the C++11 equivalent of a generic lambda.
     // The function object is used to send an HTTP message.
     struct send_lambda
@@ -727,7 +772,7 @@ class session : public std::enable_shared_from_this<session>
 
         template<bool isRequest, class Body, class Fields>
         void
-        operator()(http::message<isRequest, Body, Fields>&& msg) const
+        send_lambda::operator()(http::message<isRequest, Body, Fields>&& msg) const
         {
             // The lifetime of the message has to extend
             // for the duration of the async operation so
@@ -748,16 +793,9 @@ class session : public std::enable_shared_from_this<session>
                     self_.shared_from_this(),
                     sp->need_eof()));
         }
+
     };
-
-    beast::tcp_stream stream_;
-    beast::flat_buffer buffer_;
-    http::request<http::string_body> req_;
-    std::shared_ptr<void> res_;
-    send_lambda lambda_;
-
-    sparql* s;
-
+*/
 public:
     // Take ownership of the stream
     session(
@@ -853,6 +891,30 @@ public:
         // At this point the connection is closed gracefully
     }
 };
+
+        template<bool isRequest, class Body, class Fields>
+        void
+        send_lambda::operator()(http::message<isRequest, Body, Fields>&& msg) const
+        {
+            // The lifetime of the message has to extend
+            // for the duration of the async operation so
+            // we use a shared_ptr to manage it.
+            auto sp = std::make_shared<
+                http::message<isRequest, Body, Fields>>(std::move(msg));
+
+            // Store a type-erased version of the shared
+            // pointer in the class to keep it alive.
+            self_.res_ = sp;
+
+            // Write the response
+            http::async_write(
+                self_.stream_,
+                *sp,
+                beast::bind_front_handler(
+                    &session::on_write,
+                    self_.shared_from_this(),
+                    sp->need_eof()));
+        }
 
 //------------------------------------------------------------------------------
 
