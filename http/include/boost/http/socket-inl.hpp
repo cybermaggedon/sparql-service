@@ -56,21 +56,20 @@ asio::io_service &basic_socket<Socket>::get_io_service()
 
 template<class Socket>
 template<class Request, class CompletionToken>
-typename asio::async_result<
-    typename asio::handler_type<CompletionToken,
-                                void(system::error_code)>::type>::type
+typename asio::async_result<CompletionToken,
+			    void(system::error_code)>::completion_handler_type
 basic_socket<Socket>::async_read_request(Request &request,
                                          CompletionToken &&token)
 {
     static_assert(is_request_message<Request>::value,
                   "Request must fulfill the Request concept");
 
-    typedef typename asio::handler_type<
-        CompletionToken, void(system::error_code)>::type Handler;
+    typedef typename asio::async_result<
+        CompletionToken, void(system::error_code)>::completion_handler_type Handler;
 
     Handler handler(std::forward<CompletionToken>(token));
 
-    asio::async_result<Handler> result(handler);
+    auto result = handler.async_result();
 
     if (istate != http::read_state::empty) {
         invoke_handler(std::forward<decltype(handler)>(handler),
@@ -90,20 +89,19 @@ basic_socket<Socket>::async_read_request(Request &request,
 
 template<class Socket>
 template<class Message, class CompletionToken>
-typename asio::async_result<
-    typename asio::handler_type<CompletionToken,
-                                void(system::error_code)>::type>::type
+typename asio::async_result<CompletionToken,
+			    void(system::error_code)>::completion_handler_type
 basic_socket<Socket>::async_read_some(Message &message, CompletionToken &&token)
 {
     static_assert(is_message<Message>::value,
                   "Message must fulfill the Message concept");
 
-    typedef typename asio::handler_type<
-        CompletionToken, void(system::error_code)>::type Handler;
+    typedef typename asio::async_result<
+        CompletionToken, void(system::error_code)>::completion_handler_type Handler;
 
     Handler handler(std::forward<CompletionToken>(token));
 
-    asio::async_result<Handler> result(handler);
+    auto result = handler.async_result();
 
     if (istate != http::read_state::message_ready) {
         invoke_handler(std::forward<decltype(handler)>(handler),
@@ -118,21 +116,20 @@ basic_socket<Socket>::async_read_some(Message &message, CompletionToken &&token)
 
 template<class Socket>
 template<class Message, class CompletionToken>
-typename asio::async_result<
-    typename asio::handler_type<CompletionToken,
-                                void(system::error_code)>::type>::type
+typename asio::async_result<CompletionToken,
+			    void(system::error_code)>::completion_handler_type
 basic_socket<Socket>::async_read_trailers(Message &message,
                                           CompletionToken &&token)
 {
     static_assert(is_message<Message>::value,
                   "Message must fulfill the Message concept");
 
-    typedef typename asio::handler_type<
-        CompletionToken, void(system::error_code)>::type Handler;
+    typedef typename asio::async_result<
+        CompletionToken, void(system::error_code)>::completion_handler_type Handler;
 
     Handler handler(std::forward<CompletionToken>(token));
 
-    asio::async_result<Handler> result(handler);
+    auto result = handler.async_result();
 
     if (istate != http::read_state::body_ready) {
         invoke_handler(std::forward<decltype(handler)>(handler),
@@ -147,9 +144,8 @@ basic_socket<Socket>::async_read_trailers(Message &message,
 
 template<class Socket>
 template<class Response, class CompletionToken>
-typename asio::async_result<
-    typename asio::handler_type<CompletionToken,
-                                void(system::error_code)>::type>::type
+typename asio::async_result<CompletionToken,
+			    void(system::error_code)>::completion_handler_type
 basic_socket<Socket>
 ::async_write_response(const Response &response, CompletionToken &&token)
 {
@@ -157,11 +153,11 @@ basic_socket<Socket>
                   "Response must fulfill the Response concept");
 
     using detail::string_literal_buffer;
-    typedef typename asio::handler_type<
-        CompletionToken, void(system::error_code)>::type Handler;
+    typedef typename asio::async_result<
+        CompletionToken, void(system::error_code)>::completion_handler_type Handler;
 
     Handler handler(std::forward<CompletionToken>(token));
-    asio::async_result<Handler> result(handler);
+    auto result = handler.async_result();
 
     const auto status_code = response.status_code();
     const auto &reason_phrase = response.reason_phrase();
@@ -260,18 +256,17 @@ basic_socket<Socket>
 
 template<class Socket>
 template<class CompletionToken>
-typename asio::async_result<
-    typename asio::handler_type<CompletionToken,
-                                void(system::error_code)>::type>::type
+typename asio::async_result<CompletionToken,
+			    void(system::error_code)>::completion_handler_type
 basic_socket<Socket>
 ::async_write_response_continue(CompletionToken &&token)
 {
-    typedef typename asio::handler_type<
-        CompletionToken, void(system::error_code)>::type Handler;
+    typedef typename asio::async_result<
+        CompletionToken, void(system::error_code)>::completion_handler_type Handler;
 
     Handler handler(std::forward<CompletionToken>(token));
 
-    asio::async_result<Handler> result(handler);
+    auto result = handler.async_result();
 
     if (!writer_helper.write_continue()) {
         invoke_handler(std::forward<decltype(handler)>(handler),
@@ -292,9 +287,8 @@ basic_socket<Socket>
 
 template<class Socket>
 template<class Response, class CompletionToken>
-typename asio::async_result<
-    typename asio::handler_type<CompletionToken,
-                                void(system::error_code)>::type>::type
+typename asio::async_result<CompletionToken,
+			    void(system::error_code)>::completion_handler_type
 basic_socket<Socket>
 ::async_write_response_metadata(const Response &response,
                                 CompletionToken &&token)
@@ -303,12 +297,12 @@ basic_socket<Socket>
                   "Response must fulfill the Response concept");
 
     using detail::string_literal_buffer;
-    typedef typename asio::handler_type<
-        CompletionToken, void(system::error_code)>::type Handler;
+    typedef typename asio::async_result<
+        CompletionToken, void(system::error_code)>::completion_handler_type Handler;
 
     Handler handler(std::forward<CompletionToken>(token));
 
-    asio::async_result<Handler> result(handler);
+    auto result = handler.async_result();
 
     const auto status_code = response.status_code();
     const auto &reason_phrase = response.reason_phrase();
@@ -389,9 +383,8 @@ basic_socket<Socket>
 
 template<class Socket>
 template<class Message, class CompletionToken>
-typename asio::async_result<
-    typename asio::handler_type<CompletionToken,
-                                void(system::error_code)>::type>::type
+typename asio::async_result<CompletionToken,
+			    void(system::error_code)>::return_type
 basic_socket<Socket>::async_write(const Message &message,
                                   CompletionToken &&token)
 {
@@ -399,12 +392,27 @@ basic_socket<Socket>::async_write(const Message &message,
                   "Message must fulfill the Message concept");
 
     using detail::string_literal_buffer;
-    typedef typename asio::handler_type<
-        CompletionToken, void(system::error_code)>::type Handler;
+
+    using SIG = void(system::error_code);
+    using Result = asio::async_result<CompletionToken, SIG>;
+    using Handler = typename Result::completion_handler_type;
+
+//    typedef typename asio::async_result<
+//        CompletionToken, void(system::error_code)>::completion_handler_type Handler;
 
     Handler handler(std::forward<CompletionToken>(token));
 
-    asio::async_result<Handler> result(handler);
+//    auto result = handler.async_result(handler);
+//    typename asio::async_result<
+//        CompletionToken, void(system::error_code)>::return_type result;
+//    auto result = asio::async_result<
+//        CompletionToken, void(system::error_code)>(handler);
+//    auto result = asio::async_result<CompletionToken, void(system::error_code)>(handler);
+//    typedef typename asio::async_result<
+//        CompletionToken, void(system::error_code)> FIXME;
+//    FIXME result(handler);
+//    auto result = thing.async_result(handler);
+    Result result(handler);
 
     if (!writer_helper.write()) {
         invoke_handler(std::forward<decltype(handler)>(handler),
@@ -445,9 +453,8 @@ basic_socket<Socket>::async_write(const Message &message,
 
 template<class Socket>
 template<class Message, class CompletionToken>
-typename asio::async_result<
-    typename asio::handler_type<CompletionToken,
-                                void(system::error_code)>::type>::type
+typename asio::async_result<CompletionToken,
+			    void(system::error_code)>::completion_handler_type
 basic_socket<Socket>::async_write_trailers(const Message &message,
                                            CompletionToken &&token)
 {
@@ -455,12 +462,12 @@ basic_socket<Socket>::async_write_trailers(const Message &message,
                   "Message must fulfill the Message concept");
 
     using detail::string_literal_buffer;
-    typedef typename asio::handler_type<
-        CompletionToken, void(system::error_code)>::type Handler;
+    typedef typename asio::async_result<
+        CompletionToken, void(system::error_code)>::completion_handler_type Handler;
 
     Handler handler(std::forward<CompletionToken>(token));
 
-    asio::async_result<Handler> result(handler);
+    auto result = handler.async_result();
 
     if (!writer_helper.write_trailers()) {
         invoke_handler(std::forward<decltype(handler)>(handler),
@@ -510,19 +517,18 @@ basic_socket<Socket>::async_write_trailers(const Message &message,
 
 template<class Socket>
 template<class CompletionToken>
-typename asio::async_result<
-    typename asio::handler_type<CompletionToken,
-                                void(system::error_code)>::type>::type
+typename asio::async_result<CompletionToken,
+			    void(system::error_code)>::completion_handler_type
 basic_socket<Socket>
 ::async_write_end_of_message(CompletionToken &&token)
 {
     using detail::string_literal_buffer;
-    typedef typename asio::handler_type<
-        CompletionToken, void(system::error_code)>::type Handler;
+    typedef typename asio::async_result<
+        CompletionToken, void(system::error_code)>::completion_handler_type Handler;
 
     Handler handler(std::forward<CompletionToken>(token));
 
-    asio::async_result<Handler> result(handler);
+    auto result = handler.async_result();
 
     if (!writer_helper.end()) {
         invoke_handler(std::forward<decltype(handler)>(handler),

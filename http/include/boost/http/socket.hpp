@@ -54,21 +54,18 @@ public:
     // ### READ FUNCTIONS ###
 
     template<class Request, class CompletionToken>
-    typename asio::async_result<
-        typename asio::handler_type<CompletionToken,
-                                    void(system::error_code)>::type>::type
+    typename asio::async_result<CompletionToken,
+				void(system::error_code)>::completion_handler_type
     async_read_request(Request &request, CompletionToken &&token);
 
     template<class Message, class CompletionToken>
-    typename asio::async_result<
-        typename asio::handler_type<CompletionToken,
-                                    void(system::error_code)>::type>::type
+    typename asio::async_result<CompletionToken,
+				void(system::error_code)>::completion_handler_type
     async_read_some(Message &message, CompletionToken &&token);
 
     template<class Message, class CompletionToken>
-    typename asio::async_result<
-        typename asio::handler_type<CompletionToken,
-                                    void(system::error_code)>::type>::type
+    typename asio::async_result<CompletionToken,
+                                    void(system::error_code)>::completion_handler_type
     async_read_trailers(Message &message, CompletionToken &&token);
 
     // ### END OF READ FUNCTIONS ###
@@ -76,40 +73,34 @@ public:
     // ### WRITE FUNCTIONS ###
 
     template<class Response, class CompletionToken>
-    typename asio::async_result<
-        typename asio::handler_type<CompletionToken,
-                                    void(system::error_code)>::type>::type
+    typename asio::async_result<CompletionToken,
+				void(system::error_code)>::return_type
     async_write_response(const Response &response, CompletionToken &&token);
 
     template<class CompletionToken>
-    typename asio::async_result<
-        typename asio::handler_type<CompletionToken,
-                                    void(system::error_code)>::type>::type
+    typename asio::async_result<CompletionToken,
+                                    void(system::error_code)>::completion_handler_type
     async_write_response_continue(CompletionToken &&token);
 
     template<class Response, class CompletionToken>
-    typename asio::async_result<
-        typename asio::handler_type<CompletionToken,
-                                    void(system::error_code)>::type>::type
+    typename asio::async_result<CompletionToken,
+                                    void(system::error_code)>::completion_handler_type
     async_write_response_metadata(const Response &response,
                                   CompletionToken &&token);
 
     template<class Message, class CompletionToken>
-    typename asio::async_result<
-        typename asio::handler_type<CompletionToken,
-                                    void(system::error_code)>::type>::type
+    typename asio::async_result<CompletionToken,
+                                    void(system::error_code)>::completion_handler_type
     async_write(const Message &message, CompletionToken &&token);
 
     template<class Message, class CompletionToken>
-    typename asio::async_result<
-        typename asio::handler_type<CompletionToken,
-                                    void(system::error_code)>::type>::type
+    typename asio::async_result<CompletionToken,
+                                    void(system::error_code)>::completion_handler_type
     async_write_trailers(const Message &message, CompletionToken &&token);
 
     template<class CompletionToken>
-    typename asio::async_result<
-        typename asio::handler_type<CompletionToken,
-                                    void(system::error_code)>::type>::type
+    typename asio::async_result<CompletionToken,
+                                    void(system::error_code)>::completion_handler_type
     async_write_end_of_message(CompletionToken &&token);
 
     // ### END OF WRITE FUNCTIONS ###
