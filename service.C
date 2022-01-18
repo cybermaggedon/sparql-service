@@ -431,11 +431,13 @@ int main(int argc, char** argv)
 
     signals.async_wait(signal_handler);
 
+#define GET_IO_SERVICE(s) ((boost::asio::io_context&)(s).get_executor().context())
+    
     auto work = [&acceptor, &s](asio::yield_context yield) {
         for ( ; true ; ) {
             try {
                 auto connection
-                    = connection::make_connection(acceptor.get_io_service(),
+                    = connection::make_connection(GET_IO_SERVICE(acceptor),
                                                   s);
                 acceptor.async_accept(connection->tcp_layer(), yield);
 
@@ -443,7 +445,7 @@ int main(int argc, char** argv)
                     = [connection](asio::yield_context yield) mutable {
                     (*connection)(yield);
                 };
-                spawn(acceptor.get_io_service(), handle_connection);
+                spawn(GET_IO_SERVICE(acceptor), handle_connection);
             } catch (std::exception &e) {
                 cerr << "Accept exception: " << e.what() << endl;
             }
