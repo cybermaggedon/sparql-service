@@ -53,12 +53,19 @@ jobs:
         with:
           name: sparql-executable
 
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action
+        with:
+          images: cybermaggedon/sparql-service
+
       - name: Build and push
         uses: docker/build-push-action@v3
         with:
           context: .
           push: false
-          tags: user/app:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
 #       - name: Set up QEMU
 #         uses: docker/setup-qemu-action@v2
