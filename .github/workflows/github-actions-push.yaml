@@ -44,12 +44,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      - name: Checkout
+        uses: actions/checkout@v3
+
       - name: Download executable
         uses: actions/download-artifact@v3
         with:
           name: sparql-executable
 
-      - run: ls -lR
+      - name: Build and push
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: false
+          tags: user/app:latest
 
 #       - name: Set up QEMU
 #         uses: docker/setup-qemu-action@v2
