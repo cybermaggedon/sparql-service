@@ -13,7 +13,7 @@ permissions:
 
 jobs:
 
-  build:
+  compile:
     name: Compile
     runs-on: ubuntu-latest
 
@@ -37,6 +37,18 @@ jobs:
         with:
           name: sparql-executable
           path: sparql
+
+  build-image:
+    name: Docker image
+    runs-in: ubuntu-latest
+
+    steps:
+      - name: Download executable
+        uses: actions/download-artifact@v3
+        with:
+          name: sparql-executable
+
+      - run: ls -lR
 
 #       - name: Set up QEMU
 #         uses: docker/setup-qemu-action@v2
