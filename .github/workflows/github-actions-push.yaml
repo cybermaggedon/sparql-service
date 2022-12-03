@@ -1,0 +1,52 @@
+
+name: Publish SPARQL docker image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+
+  build:
+    name: Compile
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install packages
+        run: sudo apt update &&
+          sudo apt install -y libboost-system-dev libboost-coroutine-dev
+              libboost-dev &&
+          sudo apt install -y librasqal3-dev librdf-dev libraptor2-dev &&
+          sudo apt install -y g++ make
+
+      - name: Build
+        run: make
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v3
+        with:
+          name: sparql-executable
+          path: sparql
+
+#       - name: Set up QEMU
+#         uses: docker/setup-qemu-action@v2
+
+#       - name: Set up docker buildx
+#         uses: docker/setup-buildx-action@v2
+
+#       - name: Build and push
+#         uses: docker/build-push-action@v3
+#         with:
+#           context: .
+#           push: false
+#           tags: user/app:latest
