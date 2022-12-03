@@ -67,9 +67,11 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: cybermaggedon/sparql-service
-
-      - run: echo ${{ steps.meta.outputs.tags }}
-      - run: echo ${{ steps.meta.outputs.labels }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push
         uses: docker/build-push-action@v3
