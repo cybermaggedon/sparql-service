@@ -10,6 +10,7 @@ RUN apt update && \
 RUN mkdir /data/
 
 COPY sparql /usr/local/bin/
+RUN chmod 755 /usr/local/bin/sparql
 
 WORKDIR /data/
 CMD /usr/local/bin/sparql 8089 sqlite data.db
