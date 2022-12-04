@@ -3,7 +3,7 @@ FROM ubuntu:latest
 
 RUN apt update && \
     apt upgrade -y && \
-    apt install -y libboost-system1.74.0 libboost-coroutine1.74.0 && \
+    apt install -y libboost-system1.71.0 libboost-coroutine1.71.0 && \
     apt install -y librasqal3 librdf0 libraptor2-0 librdf-storage-sqlite && \
     apt clean all
 
