@@ -1,0 +1,17 @@
+
+FROM fedora:36
+
+RUN dnf install -y make gcc-c++
+RUN dnf install -y rasqal-devel redland-devel raptor2-devel
+RUN dnf install -y boost-devel
+
+RUN mkdir /build /build/netmindms /build/http
+WORKDIR /build
+
+ADD Makefile Makefile
+COPY *.C *.h .
+COPY netmindms netmindms/
+COPY http http/
+
+RUN make
+
