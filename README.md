@@ -3,9 +3,10 @@
 
 ## Introduction
 
-This is a SPARQL endpoint i.e. network service which executes SPARQL queries
+This is a SPARQL 1.0 endpoint i.e. network service which executes SPARQL queries
 on behalf of a client.  The queries are executed against a data set held on
-the server side.
+the server side.  The SPARQL service is read-only and does not support
+update commands.
 
 This is based on the Redland RDF libraries and uses Redland to implement
 SPARQL queries.
@@ -79,5 +80,13 @@ docker.io/cybermaggedon/sparql-service
 Expects to find the store as sqlite format store at /data/data.db, so
 you can mount a volume on `/data`.
 
+The container exposes the SPARQL service via HTTP on port 8089.  The container
+does not support TLS, if you want to use TLS add a front-end proxy using e.g.
+nginx.
 
+You can override the default container command line to change the
+store filename or use other store types.  The container default command is:
+```
+sparql 8089 sqlite data.db
+```
 
