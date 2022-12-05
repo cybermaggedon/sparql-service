@@ -34,12 +34,18 @@ jobs:
           tags: latest
           file: Dockerfile.build
 
+      # - name: Extract executable
+      #   uses: shrink/actions-docker-extract@v2
+      #   id: extract
+      #   with:
+      #     image: sparql-build
+      #     path: /build/sparql
+
+      - name: Compile
+        run: docker run --name build sparql-build make
+
       - name: Extract executable
-        uses: shrink/actions-docker-extract@v2
-        id: extract
-        with:
-          image: sparql-build
-          path: /build/sparql
+        run: docker cp build:sparql sparql
 
       - name: Upload executable
         uses: actions/upload-artifact@v3
