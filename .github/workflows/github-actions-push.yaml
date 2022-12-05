@@ -40,11 +40,13 @@ jobs:
       #     image: sparql-build
       #     path: /build/sparql
 
+      - run: docker ps -a
+
       - name: Compile
         run: docker run --name build sparql-build make
 
       - name: Extract executable
-        run: docker cp build:sparql sparql
+        run: docker cp build:/build/sparql sparql
 
       - name: Upload executable
         uses: actions/upload-artifact@v3
